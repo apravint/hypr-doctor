@@ -50,5 +50,58 @@ submap = reset
             # Escape in global and escape in resize submap must NOT collide
             self.assertEqual(res["summary"]["critical"], 0)
 
+    def test_fix_duplicate_comment_strategy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf = os.path.join(tmpdir, "hyprland.conf")
+            with open(conf, "w") as f:
+                f.write("""$mainMod = SUPER
+bind = $mainMod, Return, exec, alacritty
+bind = $mainMod, Return, exec, kitty
+""")
+            doc = HyprDoctor(conf)
+            fix_res = doc.fix(strategy="comment")
+            self.assertEqual(fix_res["fixed_count"], 1)
+            self.assertEqual(len(fix_res["backups"]), 1)
+            self.assertTrue(os.path.exists(fix_res["backups"][0]))
+
+            # Re-audit must now be clean
+            audit_after = doc.audit()
+            self.assertEqual(audit_after["summary"]["critical"], 0)
+            self.assertTrue(audit_after["summary"]["clean"])
+
+            with open(conf, "r") as f:
+                content = f.read()
+            self.assertIn("# [hypr-doctor disabled duplicate of line 2]", content)
+
+    def test_fix_duplicate_remap_strategy(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf = os.path.join(tmpdir, "hyprland.conf")
+            with open(conf, "w") as f:
+                f.write("""$mainMod = SUPER
+bind = $mainMod, O, exec, iram-orchestrator
+bind = $mainMod, O, exec, obsidian
+""")
+            doc = HyprDoctor(conf)
+            fix_res = doc.fix(strategy="remap")
+            self.assertEqual(fix_res["fixed_count"], 1)
+
+            # Re-audit must be clean
+            audit_after = doc.audit()
+            self.assertEqual(audit_after["summary"]["critical"], 0)
+
+            with open(conf, "r") as f:
+                content = f.read()
+            self.assertIn("bind = $mainMod CTRL ALT, O, exec, obsidian", content)
+
+    def test_fix_clean_config_noop(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            conf = os.path.join(tmpdir, "hyprland.conf")
+            with open(conf, "w") as f:
+                f.write("""$mainMod = SUPER\nbind = $mainMod, Q, killactive\n""")
+            doc = HyprDoctor(conf)
+            fix_res = doc.fix()
+            self.assertEqual(fix_res["fixed_count"], 0)
+            self.assertEqual(len(fix_res["backups"]), 0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,6 +53,12 @@ pip install -e .
 # Audit active configuration (~/.config/hypr/hyprland.conf)
 hypr-doctor check
 
+# Automatically resolve duplicate keybindings with timestamped backup:
+hypr-doctor fix
+
+# Or automatically remap duplicates to free modifiers ($mainMod CTRL ALT):
+hypr-doctor fix --strategy remap --reload
+
 # Audit specific file
 hypr-doctor check /path/to/hyprland.conf
 

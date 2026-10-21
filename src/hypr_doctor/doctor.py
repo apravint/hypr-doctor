@@ -8,6 +8,8 @@ import os
 import re
 import shutil
 import string
+import datetime
+import subprocess
 from typing import Dict, List, Any, Optional, Set, Tuple
 
 KNOWN_DISPATCHERS = {
@@ -31,6 +33,7 @@ class HyprDoctor:
         if not os.path.exists(self.config_path):
             raise FileNotFoundError(f"Hyprland configuration not found: {self.config_path}")
 
+        self.visited_files.clear()
         issues: List[Dict[str, Any]] = []
         binds_map: Dict[str, Dict[str, Any]] = {}
         all_binds: List[Dict[str, Any]] = []
@@ -204,6 +207,14 @@ class HyprDoctor:
                 "type": "DUPLICATE_BIND",
                 "file": file,
                 "line": line_no,
+                "raw": raw_line.rstrip("\r\n"),
+                "bind_key": bind_key,
+                "bind_type": bind_type,
+                "submap": submap,
+                "mods": mods,
+                "key": key,
+                "dispatcher": dispatcher,
+                "args": args,
                 "message": f"Conflicting keybind: '{bind_key}' is already bound to '{prev['dispatcher']} {prev['args']}' at line {prev['line']}",
                 "previous_file": prev["file"],
                 "previous_line": prev["line"],
@@ -259,6 +270,97 @@ class HyprDoctor:
                 return f"Try assigning to {c}, {key}"
         return f"Try using a dedicated submap or $mainMod CTRL ALT, {key}"
 
+    def fix(self, strategy: str = "comment", reload_hyprland: bool = False) -> Dict[str, Any]:
+        """
+        Remediate duplicate keybindings automatically with safe timestamped backups.
+        strategy: 'comment' (comment out duplicates) or 'remap' (attempt remap to $mainMod CTRL ALT)
+        """
+        audit_report = self.audit()
+        dup_issues = [i for i in audit_report["issues"] if i["type"] == "DUPLICATE_BIND"]
+
+        if not dup_issues:
+            return {
+                "fixed_count": 0,
+                "backups": [],
+                "files_modified": [],
+                "message": "No duplicate binds detected. Configuration is already clean."
+            }
+
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        files_map: Dict[str, List[Dict[str, Any]]] = {}
+        for issue in dup_issues:
+            f = issue["file"]
+            if f not in files_map:
+                files_map[f] = []
+            files_map[f].append(issue)
+
+        backups = []
+        files_modified = []
+        fixed_count = 0
+        existing_combos = {b["combo"] for b in audit_report["binds"]}
+
+        for file_path, file_dups in files_map.items():
+            if not os.path.exists(file_path):
+                continue
+
+            bak_path = f"{file_path}.bak.{ts}"
+            shutil.copy2(file_path, bak_path)
+            backups.append(bak_path)
+
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+
+            dups_by_line = {d["line"]: d for d in file_dups}
+
+            new_lines = []
+            for line_idx, line in enumerate(lines, 1):
+                if line_idx in dups_by_line:
+                    dup = dups_by_line[line_idx]
+                    prev_line = dup.get("previous_line", "?")
+                    submap = dup.get("submap", "global")
+                    key = dup.get("key", "")
+                    disp = dup.get("dispatcher", "")
+                    args = dup.get("args", "")
+                    btype = dup.get("bind_type", "bind")
+
+                    if strategy == "remap":
+                        candidate_combo = f"[{submap}][press] $MAINMOD CTRL ALT + {key.upper()}"
+                        if candidate_combo not in existing_combos:
+                            comma_args = f", {args}" if args else ""
+                            new_line = f"{btype} = $mainMod CTRL ALT, {key}, {disp}{comma_args}  # [hypr-doctor remapped from duplicate at line {prev_line}]\n"
+                            existing_combos.add(candidate_combo)
+                            new_lines.append(new_line)
+                            fixed_count += 1
+                            continue
+
+                    clean_orig = line.rstrip("\r\n")
+                    new_line = f"# [hypr-doctor disabled duplicate of line {prev_line}] {clean_orig}\n"
+                    new_lines.append(new_line)
+                    fixed_count += 1
+                else:
+                    new_lines.append(line)
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            files_modified.append(file_path)
+
+        reload_output = None
+        if reload_hyprland and shutil.which("hyprctl"):
+            try:
+                res = subprocess.run(["hyprctl", "reload"], capture_output=True, text=True, timeout=5)
+                reload_output = res.stdout.strip()
+            except Exception as e:
+                reload_output = f"Reload failed: {e}"
+
+        return {
+            "fixed_count": fixed_count,
+            "backups": backups,
+            "files_modified": files_modified,
+            "reload": reload_output,
+            "message": f"Successfully resolved {fixed_count} duplicate keybinding(s)."
+        }
+
     @staticmethod
     def format_report(data: Dict[str, Any]) -> str:
         s = data["summary"]
@@ -287,3 +389,6 @@ class HyprDoctor:
 
 def audit_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     return HyprDoctor(config_path).audit()
+
+def fix_config(config_path: Optional[str] = None, strategy: str = "comment", reload_hyprland: bool = False) -> Dict[str, Any]:
+    return HyprDoctor(config_path).fix(strategy=strategy, reload_hyprland=reload_hyprland)
