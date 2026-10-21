@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hypr-doctor"
+version = "0.1.0"
+description = "🩺 Static Analysis Linter, Duplicate Keybinding Detector, and Autostart Auditor for Hyprland"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "apravint", email = "apravint@users.noreply.github.com" },
+]
+keywords = ["hyprland", "wayland", "linter", "dotfiles", "keybindings", "configuration", "auditor"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Desktop Environment :: Window Managers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+]
+
+[project.scripts]
+hypr-doctor = "hypr_doctor.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hypr_doctor"]
